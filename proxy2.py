@@ -18,6 +18,8 @@ from cStringIO import StringIO
 from subprocess import Popen, PIPE
 from HTMLParser import HTMLParser
 
+proxiedHost = ''
+proxiedScheme = ''
 
 def with_color(c, s):
     return "\x1b[%dm%s\x1b[0m" % (c, s)
@@ -113,27 +115,73 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 other.sendall(data)
 
     def do_GET(self):
+        
+        global proxiedHost
+        global proxiedScheme
+        
+        # # print "req.path 0 " + self.path[0]
+        # # print "req.path 1 " + self.path[1]
+        print "req.path " + self.path
+        time.sleep(1)
+        
         if self.path == 'http://proxy2.test/':
             self.send_cacert()
             return
 
         req = self
+        
+        # req.path = self.path[1:]
+
         content_length = int(req.headers.get('Content-Length', 0))
         req_body = self.rfile.read(content_length) if content_length else None
-
+        
+        u = ""
+        if proxiedHost == "":
+            u = urlparse.urlsplit(req.path[1:])
+            scheme, host, path = u.scheme, u.netloc, (u.path + '?' + u.query if u.query else u.path)
+            proxiedHost = host
+            proxiedScheme = scheme
+        else:
+            tmp = self.path.split(':', 1)
+            if len(tmp) > 1:
+                print "tmp " + tmp[1]
+                tmp = tmp[1].split('/', 3)
+                print "tmp " + tmp[3]
+                req.path='/' + tmp[3]
+            else:
+                req.path='/' + tmp[0]
+            print "tmp " + req.path
+            
         if req.path[0] == '/':
             if isinstance(self.connection, ssl.SSLSocket):
-                req.path = "https://%s%s" % (req.headers['Host'], req.path)
+                # req.path = "https://%s%s" % (req.headers['Host'], req.path)
+                # req.path = "https://%s%s" % (proxiedHost, req.path)
+                req.path = proxiedScheme + "://%s%s" % (proxiedHost, req.path)
             else:
-                req.path = "http://%s%s" % (req.headers['Host'], req.path)
+                # req.path = "http://%s%s" % (req.headers['Host'], req.path)
+                # req.path = "http://%s%s" % (proxiedHost, req.path)
+                req.path = proxiedScheme + "://%s%s" % (proxiedHost, req.path)
+                
 
         req_body_modified = self.request_handler(req, req_body)
         if req_body_modified is not None:
             req_body = req_body_modified
             req.headers['Content-length'] = str(len(req_body))
 
-        u = urlparse.urlsplit(req.path)
-        scheme, host, path = u.scheme, u.netloc, (u.path + '?' + u.query if u.query else u.path)
+        # u = urlparse.urlsplit(req.path[1:])
+        if u == "":
+            u = urlparse.urlsplit(req.path)
+            scheme, host, path = u.scheme, u.netloc, (u.path + '?' + u.query if u.query else u.path)
+
+        print "scheme " + scheme
+        print "host " + host
+        print "path " + path
+        time.sleep(1)
+        
+        if proxiedHost == "":
+            proxiedHost = host
+            proxiedScheme = scheme
+            
         assert scheme in ('http', 'https')
         if host:
             req.headers['Host'] = host
@@ -325,6 +373,7 @@ def test(HandlerClass=ProxyRequestHandler, ServerClass=ThreadingHTTPServer, prot
     else:
         port = 8080
     server_address = ('', port)
+    # server_address = ('http://en.wikipedia.org', port)
 
     HandlerClass.protocol_version = protocol
     httpd = ServerClass(server_address, HandlerClass)
